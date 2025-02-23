@@ -1,84 +1,68 @@
-import camera
-import network
-import time
-import socket
+#include "ESP_I2S.h"
+#include "FS.h"
+#include "SD.h"
 
-# AP credentials (Change as needed)
-SSID = "ESP32-CAM-AP"
-PASSWORD = "12345678"
-PORT = 80
+void setup() {
+  // Create an instance of the I2SClass
+  I2SClass i2s;
 
-# Camera configuration
-CAMERA_PARAMETERS = {
-    "data_pins": [15, 17, 18, 16, 14, 12, 11, 48],
-    "vsync_pin": 38,
-    "href_pin": 47,
-    "sda_pin": 40,
-    "scl_pin": 39,
-    "pclk_pin": 13,
-    "xclk_pin": 10,
-    "xclk_freq": 20000000,
-    "powerdown_pin": -1,
-    "reset_pin": -1,
-    "frame_size": camera.FrameSize.R96X96,  # Use camera.FrameSize
-    "pixel_format": camera.PixelFormat.GRAYSCALE  # Use camera.PixelFormat
+  // Create variables to store the audio data
+  uint8_t *wav_buffer;
+  size_t wav_size;
+
+  // Initialize the serial port
+  Serial.begin(115200);
+  while (!Serial) {
+    delay(10);
+  }
+
+  Serial.println("Initializing I2S bus...");
+
+  // Set up the pins used for audio input
+  i2s.setPinsPdmRx(42, 41);
+
+  // start I2S at 16 kHz with 16-bits per sample
+  if (!i2s.begin(I2S_MODE_PDM_RX, 16000, I2S_DATA_BIT_WIDTH_16BIT, I2S_SLOT_MODE_MONO)) {
+    Serial.println("Failed to initialize I2S!");
+    while (1); // do nothing
+  }
+
+  Serial.println("I2S bus initialized.");
+  Serial.println("Initializing SD card...");
+
+  // Set up the pins used for SD card access
+  if(!SD.begin(21)){
+    Serial.println("Failed to mount SD Card!");
+    while (1) ;
+  }
+  Serial.println("SD card initialized.");
+  Serial.println("Recording 20 seconds of audio data...");
+
+  // Record 20 seconds of audio data
+  wav_buffer = i2s.recordWAV(20, &wav_size);
+
+  // Create a file on the SD card
+  File file = SD.open("/arduinor_rec.wav", FILE_WRITE);
+  if (!file) {
+    Serial.println("Failed to open file for writing!");
+    return;
+  }
+
+  Serial.println("Writing audio data to file...");
+
+  // Write the audio data to the file
+  if (file.write(wav_buffer, wav_size) != wav_size) {
+    Serial.println("Failed to write audio data to file!");
+    return;
+  }
+
+  // Close the file
+  file.close();
+
+  Serial.println("Application complete.");
 }
 
-# Initialize camera
-cam = camera.Camera(**CAMERA_PARAMETERS)
-cam.init()
-cam.set_bmp_out(True)  # Uncompressed images for preprocessing
-
-# Test camera capture
-frame = cam.capture()
-if frame:
-    print("Captured frame successfully! Length:", len(frame))
-else:
-    print("Failed to capture frame.")
-
-# Set up Access Point (AP) mode
-ap = network.WLAN(network.AP_IF)  # Enable Access Point mode
-ap.active(True)
-ap.config(essid=SSID, password=PASSWORD)
-
-print(f"Starting AP mode: {SSID}")
-while not ap.active():
-    time.sleep(1)
-
-print("Access Point is active. IP Address:", ap.ifconfig()[0])
-
-
-# Serve video stream
-def serve_stream():
-    addr = socket.getaddrinfo("0.0.0.0", PORT)[0][-1]
-    s = socket.socket()
-    s.bind(addr)
-    s.listen(5)
-    print("Web server running... Connect to", ap.ifconfig()[0])
-
-    while True:
-        conn, addr = s.accept()
-        print("Client connected from", addr)
-        conn.send(
-            b"HTTP/1.1 200 OK\r\n"
-            b"Content-Type: multipart/x-mixed-replace; boundary=frame\r\n\r\n"
-        )
-
-        try:
-            while True:
-                frame = cam.capture()
-                if frame:
-                    conn.send(
-                        b"--frame\r\n"
-                        b"Content-Type: image/jpeg\r\n"
-                        b"Content-Length: " + str(len(frame)).encode() + b"\r\n\r\n" +
-                        frame + b"\r\n"
-                    )
-                time.sleep(0.05)  # Adjust delay to balance performance
-        except Exception as e:
-            print("Client disconnected:", e)
-        finally:
-            conn.close()
-
-serve_stream()
-
+void loop() {
+  delay(1000);
+  Serial.printf(".");
+}
